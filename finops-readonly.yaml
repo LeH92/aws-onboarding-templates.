@@ -1,42 +1,15 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: >
-  Rôle IAM cross-account pour FinOps/GreenOps SaaS :
-  lecture Cost Explorer + empreinte carbone.
-  Le rôle est assumable par le compte SaaS (918689941468) avec un External ID.
+Description: Rôle IAM cross-account (lecture Cost Explorer + empreinte carbone) pour GreenOps SaaS.
 
 Parameters:
   ExternalId:
     Type: String
-    Description: External ID unique fourni par le SaaS (sécurité contre l'usurpation).
+    Description: External ID unique fourni par le SaaS (UUID).
     MinLength: 6
   RoleName:
     Type: String
     Default: FinOpsReadOnlyRole
     Description: Nom du rôle IAM à créer.
-  UseManagedPolicy:
-    Type: String
-    Default: 'Yes'
-    AllowedValues: ['Yes', 'No']
-    Description: Yes = attacher AWSBillingReadOnlyAccess ; No = créer une policy minimale custom.
-  IncludeCarbonS3Access:
-    Type: String
-    Default: 'No'
-    AllowedValues: ['Yes', 'No']
-    Description: Ajouter l'accès lecture au bucket S3 d'export carbone ?
-  CarbonExportBucketName:
-    Type: String
-    Default: ''
-    Description: Nom du bucket S3 où le client exporte les données carbone (laisser vide si non utilisé).
-  CarbonExportPrefix:
-    Type: String
-    Default: ''
-    Description: Préfixe S3 (ex: carbon-emissions/) ; laisser vide si non utilisé.
-
-Conditions:
-  UseManaged: !Equals [!Ref UseManagedPolicy, 'Yes']
-  IncludeS3: !Equals [!Ref IncludeCarbonS3Access, 'Yes']
-  HasBucket: !Not [!Equals [!Ref CarbonExportBucketName, '']]
-  HasPrefix: !Not [!Equals [!Ref CarbonExportPrefix, '']]
 
 Resources:
   FinOpsReadOnlyRole:
@@ -48,65 +21,15 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              AWS: "arn:aws:iam::918689941468:root"
-            Action: sts:AssumeRole
+              AWS: "arn:aws:iam::918689941468:root"   # <- ton Account ID SaaS
+            Action: "sts:AssumeRole"
             Condition:
               StringEquals:
-                sts:ExternalId: !Ref ExternalId
-      ManagedPolicyArns: !If
-        - UseManaged
-        - [ "arn:aws:iam::aws:policy/AWSBillingReadOnlyAccess" ]
-        - !Ref "AWS::NoValue"
-
-  # Policy custom minimale si UseManagedPolicy = No
-  CustomReadOnlyPolicy:
-    Type: AWS::IAM::ManagedPolicy
-    Condition: !If [UseManaged, false, true]
-    Properties:
-      ManagedPolicyName: !Sub "${RoleName}-ReadOnly-Policy"
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Sid: CostExplorerReadOnly
-            Effect: Allow
-            Action:
-              - "ce:Describe*"
-              - "ce:Get*"
-              - "ce:List*"
-            Resource: "*"
-          - Sid: CarbonSummaryReadOnly
-            Effect: Allow
-            Action:
-              - "sustainability:GetCarbonFootprintSummary"
-            Resource: "*"
-          - Sid: CarbonExportListBucket
-            Effect: Allow
-            Action:
-              - "s3:ListBucket"
-            Resource: !If
-              - HasBucket
-              - !Sub "arn:aws:s3:::${CarbonExportBucketName}"
-              - !Ref "AWS::NoValue"
-            Condition: !If
-              - HasPrefix
-              - { StringLike: { "s3:prefix": [ !Sub "${CarbonExportPrefix}*" ] } }
-              - !Ref "AWS::NoValue"
-          - Sid: CarbonExportGetObject
-            Effect: Allow
-            Action:
-              - "s3:GetObject"
-            Resource: !If
-              - HasBucket
-              - !If
-                - HasPrefix
-                - !Sub "arn:aws:s3:::${CarbonExportBucketName}/${CarbonExportPrefix}*"
-                - !Sub "arn:aws:s3:::${CarbonExportBucketName}/*"
-              - !Ref "AWS::NoValue"
+                "sts:ExternalId": !Ref ExternalId
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AWSBillingReadOnlyAccess"
 
 Outputs:
   RoleArn:
-    Description: ARN du rôle à transmettre au SaaS.
+    Description: ARN du rôle à transmettre au SaaS
     Value: !GetAtt FinOpsReadOnlyRole.Arn
-  Mode:
-    Description: Mode de permissions utilisé (Managed vs Custom).
-    Value: !If [UseManaged, "AWSBillingReadOnlyAccess", "Custom minimal policy"]
